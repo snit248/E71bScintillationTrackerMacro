@@ -162,6 +162,7 @@ void SandRate(Int_t subrun = 0){
 
   TGraphErrors *g2 = new TGraphErrors(filtered_n, &filtered_day[0], &filtered_pot[0], &filtered_dayerr[0], &filtered_poterr[0]);
   g2->SetMarkerStyle(20);
+  g2->SetLineWidth(2);
   g2->SetMarkerColor(kBlue);
 
   char buf[128];
