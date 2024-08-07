@@ -140,6 +140,7 @@ void POT_graph_forPAC() {
     c1->SetHighLightColor(2); // 次の線の色設定
     c1->ToggleEventStatus(); // イベントステータスの表示を切り替え
     c1->ToggleToolBar(); // ツールバーの表示を切り替え
+    c1->SetGrid(); // グリッド線の表示を有効にする
 
     graph_bm->Draw("ALP");
     graph->Draw("LP same");
