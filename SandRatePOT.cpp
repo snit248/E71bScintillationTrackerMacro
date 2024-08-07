@@ -1,17 +1,17 @@
 //#define DEBUG
 
-void SandRate(Int_t subrun = 0){
+void SandRatePOT(){
 
   using namespace std;
 
-  TString qsdfilename[1] = {"../../POT/E71b_ALL_POT/E71bALLPOT.root"};
-  TString trkfilename[1] = {"../E71b_ALL_ST/E71b_ST_data.root"};
-  Int_t daystart[1]   = {1700665200}; //2021-11-23 00:00:00
-  Int_t rangestart[1] = {1700665200};
-  Int_t rangeend[1]   = {1708819200}; //2024-02-25 00:00:00
+  TString qsdfilename = {"../../POT/E71b_ALL_POT/E71bALLPOT.root"};
+  TString trkfilename = {"../E71b_ALL_ST/E71b_ST_data.root"};
+  Int_t daystart   = 1700665200; //2021-11-23 00:00:00
+  Int_t rangestart = 1700665200;
+  Int_t rangeend   = 1708819200; //2024-02-25 00:00:00
 
   // BSD (QSD) File Preparation
-  TFile *qsdfile = new TFile(qsdfilename[subrun]);
+  TFile *qsdfile = new TFile(qsdfilename);
   TTree *bsd = (TTree*)qsdfile->Get("bsd");
 
   Int_t trig_sec[3];
@@ -24,7 +24,7 @@ void SandRate(Int_t subrun = 0){
   bsd->SetBranchAddress("ct_np", ct_np);
 
   // Tracker Merged File Preparation
-  TFile *trkfile = new TFile(trkfilename[subrun]);
+  TFile *trkfile = new TFile(trkfilename);
   TTree *trktree = (TTree*)trkfile->Get("tree");
 
   Float_t pe[250];
@@ -35,6 +35,7 @@ void SandRate(Int_t subrun = 0){
   // Variables for BSD Read
   const Int_t nbsd = bsd->GetEntries();
   cout << "Total Number of Entries in the BSD File is " << nbsd << endl;
+  //vector:double型の要素を格納、.push_back()で要素を追加
   vector<Double_t> bdate, bentry, bpot;
   Double_t totalpot = 0.0;
 
@@ -49,6 +50,7 @@ void SandRate(Int_t subrun = 0){
   Int_t oneday = 86400; // 1日=86400秒
   Double_t daypot = 0.0; // 初期化
   vector<Double_t> day, pot, event, dayerr, yerr;
+  //一番最後のエントリーを取得し、そのunixtimeをmaxunixtimeとする
   trktree->GetEntry(ntrk-1);
   const Int_t maxunixtime = unixtime[0];
   cout << "maxunixtime：" << maxunixtime << endl;
@@ -56,11 +58,13 @@ void SandRate(Int_t subrun = 0){
   const Int_t maxbsdtime = trig_sec[0];
   cout << "maxbsdtime：" << maxbsdtime << endl;
 
+  //トラッカーの最初のエントリーを取得
   trktree->GetEntry(itrk);
 
   for(int ibsd = 0; ibsd < nbsd; ibsd++) {
     bsd->GetEntry(ibsd);
 
+    //POTのunixtimeがトラッカーのmaxunixtimeより大きくなったら終わり
     if(maxunixtime < trig_sec[0]) {
       cout << endl;
       cout << "maxunixtime：" << maxunixtime << endl;
@@ -73,7 +77,9 @@ void SandRate(Int_t subrun = 0){
     ct_np[4][0] /= 1.e15;
     daypot += ct_np[4][0];
 
+    //トラッカーのunixtimeがBSDのtrig_sec[0]より小さい間ループ
     while(unixtime[0] <= trig_sec[0]) {
+        //BSDのtrig_sec[0]とトラッカーのunixtimeの差が1秒以下ならループを抜ける
       if(trig_sec[0] - unixtime[0] <= 1) {
         for(int i = 0; i < 250; i++) {
           if(pe[i] > 2.5) nscint++;
@@ -84,6 +90,7 @@ void SandRate(Int_t subrun = 0){
       itrk++;
       trktree->GetEntry(itrk);
 
+      //いらない気もする
       while(unixtime[0] > maxunixtime) {
         itrk++;
         trktree->GetEntry(itrk);
@@ -94,19 +101,20 @@ void SandRate(Int_t subrun = 0){
 
     nscint = 0;
 
-    if(trig_sec[0] >= daystart[subrun] + oneday) {
-      day.push_back(daystart[subrun] + 9 * 3600 + oneday / 2);
+    //vectorに値入れていく
+    if(trig_sec[0] >= daystart + oneday) {
+      day.push_back(daystart + 9 * 3600 + oneday / 2);
       dayerr.push_back(oneday / 2.);
       pot.push_back(daypot);
       if (daypot != 0) { // daypotがゼロでないことを確認
         event.push_back(nhit / daypot);
         yerr.push_back(sqrt(nhit) / daypot);
       } else {
-        event.push_back(nan(""));
-        yerr.push_back(nan(""));
+        event.push_back(0.);
+        yerr.push_back(0.);
       }
 
-      daystart[subrun] += oneday;
+      daystart += oneday;
       daypot = 0.0;
       nhit = 0;
     }
@@ -116,87 +124,45 @@ void SandRate(Int_t subrun = 0){
 
   cout << endl;
 
+  ///ここまで計算///
+  ///ここからグラフ描画///
+
   Int_t n = day.size();  // 修正: nを宣言し、dayのサイズで初期化
 
-  // フィルタリングされたデータを格納するための新しいベクトル
-  vector<Double_t> filtered_day, filtered_event, filtered_dayerr, filtered_yerr, filtered_pot, filtered_poterr;
-
-  Double_t sum_event = 0.0;
-  Double_t ave_event;
-  Int_t N = 0;
-
-  for(int j = 0; j < n; j++) {
-    if (!std::isnan(event[j]) && !std::isinf(event[j])) { // nanやinfを無視
-      N++;
-      sum_event += event[j];
-
-      // フィルタリングされたデータを新しいベクトルに追加
-      filtered_day.push_back(day[j]);
-      filtered_event.push_back(event[j]);
-      filtered_dayerr.push_back(dayerr[j]);
-      filtered_yerr.push_back(yerr[j]);
-      filtered_pot.push_back(pot[j]);
-      filtered_poterr.push_back(0.0);
-    }
-    // UNIXタイムを日時に変換して出力
-    TDatime date(day[j]);
-    cout << j << ": " << date.AsString() << " " << event[j] << " " << dayerr[j] << " " << yerr[j] << " " << pot[j] << endl;
-  }
-  if (N > 0) {
-    ave_event = sum_event / N;
-  } else {
-    ave_event = nan("");
-  }
-  cout << "ave_event=" << ave_event << endl;
-
-  Int_t filtered_n = filtered_day.size();
-  TGraphErrors *g = new TGraphErrors(filtered_n, &filtered_day[0], &filtered_event[0], &filtered_dayerr[0], &filtered_yerr[0]);
-  g->SetMarkerStyle(20);
+  //サンドミューオンレートのグラフ
+  TGraphErrors *g1 = new TGraphErrors(n, &day[0], &event[0], &dayerr[0], &yerr[0]);
+  g1->SetMarkerStyle(20);
   gStyle->SetTimeOffset(-788918400);
-  g->GetYaxis()->SetTitleOffset(0.9);
-  g->GetYaxis()->SetRangeUser(0.6, 1.0); // Adjusted to show both datasets
-  g->GetXaxis()->SetTimeDisplay(1);
-  g->GetXaxis()->SetTimeFormat("%m/%d");
-  g->GetXaxis()->SetRangeUser(rangestart[subrun], rangeend[subrun]);
-  g->GetXaxis()->SetNdivisions(filtered_n + 2);
+  g1->GetYaxis()->SetTitleOffset(0.9);
+  g1->GetYaxis()->SetRangeUser(0.6, 1.0); // Adjusted to show both datasets
+  g1->GetXaxis()->SetTimeDisplay(1);
+  g1->GetXaxis()->SetTimeFormat("%m/%d");
+  g1->GetXaxis()->SetRangeUser(rangestart, rangeend);
+  g1->GetXaxis()->SetNdivisions(n + 2);
+  g1->SetTitle("Event Rate of the NINJA Tracker (E71b);;# of events/10^{15} protons");
 
-  TGraphErrors *g2 = new TGraphErrors(filtered_n, &filtered_day[0], &filtered_pot[0], &filtered_dayerr[0], &filtered_poterr[0]);
-  g2->SetMarkerStyle(20);
-  g2->SetLineWidth(2);
-  g2->SetMarkerColor(kBlue);
-
-  char buf[128];
-  time_t labeltime = rangestart[subrun] - (time_t)oneday; // 1日前から始める
-  struct tm *ptm;
-  for(int nbin = 0; nbin < filtered_n + 2; nbin++) {
-    labeltime += (time_t)oneday;
-    ptm = localtime(&labeltime);
-    strftime(buf, sizeof(buf), "%m/%d", ptm);
-    g->GetXaxis()->ChangeLabel(nbin + 1, 90, .025, -1, -1, -1, buf); // +1 を追加して適切な位置にラベルを表示
+  //POTのグラフ
+  TH1D *g2 = new TH1D("POT", "POT", n-1, &day[0]);
+  for(int i=0; i<n; i++) {
+    g2->SetBinContent(i+1, pot[i]);
   }
+  g2->GetXaxis()->SetTimeDisplay(1);
+  g2->GetXaxis()->SetTimeFormat("%m/%d");
+  g2->GetXaxis()->SetRangeUser(rangestart, rangeend);
+  g2->GetXaxis()->SetNdivisions(n + 2);
+  g2->SetTitle("POT of the NINJA Tracker (E71b);Date;POT (10^{15} protons)");
 
-  g->SetTitle("Event Rate of the NINJA Tracker (E71b);;# of events/10^{15} protons");
-
-  TCanvas *c1 = new TCanvas("c1", "Event Rate Plot", 1000, 600);
-  c1->SetGrid();
+  TCanvas *c1 = new TCanvas("c1", "Event Rate Plot", 1600, 600);
+  c1->Divide(2, 1);
   c1->SetBottomMargin(1.2);
 
-  g->Draw("AP");
+  c1->cd(1);
+  c1->SetGrid();
+  g1->Draw("AP");
 
-  // Create a new axis on the right
-  TGaxis*rightAxis = new TGaxis(gPad->GetUxmax(), gPad->GetUymin(), gPad->GetUxmax(), gPad->GetUymax(), 0, 0.05, 510, "+L");
-rightAxis->SetLineColor(kBlue);
-rightAxis->SetLabelColor(kBlue);
-rightAxis->SetTitle("POT [10^{15}]");
-rightAxis->Draw();
-
-// Draw the second graph using the new axis
-gPad->Update(); // Ensure the pad is updated
-g2->Draw("P SAME");
+  c1->cd(2);
+  c1->SetGrid();
+  g2->Draw();
 
 gStyle->SetOptFit(1111);
-
-TText *tex = new TText();
-TString TotalPot = Form("Total POT: %.3e", totalpot);
-tex->DrawTextNDC(0.15, 0.8, TotalPot);
 }
